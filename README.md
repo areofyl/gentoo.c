@@ -34,4 +34,4 @@ It clears the screen and animates in place. Ctrl-C to stop.
   write to a depth buffer, and shade by depth so closer points use brighter
   characters
 
-That's it. ~200 lines, no dependencies beyond libm.
+~200 lines, no dependencies beyond libm.
