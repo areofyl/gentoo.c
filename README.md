@@ -3,6 +3,8 @@
 A spinning 3D Gentoo logo in your terminal, written in C. Inspired by the
 classic donut.c.
 
+<video src="demo.mp4" autoplay loop muted playsinline></video>
+
 It takes the ASCII Gentoo logo (the one fastfetch shows), turns each filled
 character into a point in 3D space, gives it a bit of thickness, and rotates
 the whole thing on two axes with depth shading and a z-buffer.
@@ -24,14 +26,12 @@ It clears the screen and animates in place. Ctrl-C to stop.
 ## How it works
 
 - The logo is embedded as an array of strings
-- Dense glyphs (`M N m n d h y b`) become the logo body, lighter chars stay
-  empty so the natural notch in the swirl shows through as a hole
-- A Chebyshev distance transform finds how deep into the shape each cell is,
-  which is used to round the edges (cells near the silhouette get a thinner
-  z profile, interior cells get a fuller one)
-- Each cell is extruded into a few z layers for thickness
+- Each ASCII character's visual density (M=heaviest, dots/dashes=lightest)
+  maps to a height value, creating a 3D relief from the logo itself
+- Surface normals are derived from the height field gradient, giving natural
+  shading that follows the curves of the swirl
+- Blinn-Phong shading with diffuse + specular highlights
 - Every frame: rotate every point around X and Y, project with perspective,
-  write to a depth buffer, and shade by depth so closer points use brighter
-  characters
+  z-buffer, and shade by surface normal
 
-~200 lines, no dependencies beyond libm.
+~250 lines, no dependencies beyond libm.
