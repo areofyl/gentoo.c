@@ -3,7 +3,7 @@
 A spinning 3D Gentoo logo in your terminal, written in C. Inspired by the
 classic donut.c.
 
-<video src="demo.mp4" autoplay loop muted playsinline></video>
+![demo](demo.gif)
 
 It takes the ASCII Gentoo logo (the one fastfetch shows), turns each filled
 character into a point in 3D space, gives it a bit of thickness, and rotates
