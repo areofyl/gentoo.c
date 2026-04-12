@@ -1,6 +1,19 @@
 #include <math.h>
+#include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
+
+static void cleanup(void) {
+  printf("\033[?25h");
+  fflush(stdout);
+}
+
+static void handle_signal(int sig) {
+  (void)sig;
+  cleanup();
+  _exit(0);
+}
 
 #define WIDTH 80
 #define HEIGHT 24
@@ -178,6 +191,10 @@ int main(void) {
   float B = 0.0f;
   const float K1 = 38.0f; // screen scale
   const float K2 = 5.5f;  // camera distance
+
+  signal(SIGINT, handle_signal);
+  signal(SIGTERM, handle_signal);
+  atexit(cleanup);
 
   printf("\033[?25l\033[2J");
   fflush(stdout);
