@@ -114,7 +114,6 @@ static void build_points(void) {
   const int Z_LAYERS = 5;
 
   // Per-cell outward direction in object xy (gradient toward empty cells).
-  // Used as the in-plane component of the surface normal.
   float ndx[LOGO_ROWS][LOGO_COLS];
   float ndy[LOGO_ROWS][LOGO_COLS];
   for (int r = 0; r < LOGO_ROWS; r++) {
@@ -129,7 +128,6 @@ static void build_points(void) {
             int empty = (nr < 0 || nr >= LOGO_ROWS || nc < 0 ||
                          nc >= LOGO_COLS || !mask[nr][nc]);
             if (empty) {
-              // Object x grows with col, object y grows opposite to row
               ox_acc += (float)dc;
               oy_acc += (float)(-dr);
             }
@@ -166,13 +164,11 @@ static void build_points(void) {
       for (int k = 0; k < Z_LAYERS; k++) {
         if (idx >= MAX_POINTS)
           break;
-        float t = ((float)k / (Z_LAYERS - 1)) - 0.5f; // -0.5..0.5
-        float tn = t * 2.0f;                          // -1..1, used for normal
+        float t = ((float)k / (Z_LAYERS - 1)) - 0.5f;
+        float tn = t * 2.0f; // -1..1
         PX[idx] = ox;
         PY[idx] = oy;
         PZ[idx] = t * 2.0f * zr;
-        // Hemisphere normal: blends in-plane outward (xy) with z-axis,
-        // so end caps face front/back and middle layer faces sideways.
         float horiz = sqrtf(1.0f - tn * tn);
         NX[idx] = onx * horiz;
         NY[idx] = ony * horiz;
@@ -206,6 +202,15 @@ int main(void) {
     float cA = cosf(A), sA = sinf(A);
     float cB = cosf(B), sB = sinf(B);
 
+    // Light direction: upper-right-front, normalized
+    const float lx = 0.4082f, ly = 0.8165f, lz = -0.4082f;
+    // View direction: straight into screen
+    const float vx = 0.0f, vy = 0.0f, vz = -1.0f;
+    // Half-vector for Blinn-Phong: H = normalize(L + V)
+    float hx = lx + vx, hy = ly + vy, hz = lz + vz;
+    float hl = sqrtf(hx * hx + hy * hy + hz * hz);
+    hx /= hl; hy /= hl; hz /= hl;
+
     for (int i = 0; i < POINT_COUNT; i++) {
       float px = PX[i], py = PY[i], pz = PZ[i];
       float nx = NX[i], ny = NY[i], nz = NZ[i];
@@ -234,18 +239,25 @@ int main(void) {
         continue;
 
       if (ooz > zbuf[ys][xs]) {
-        // Lambertian shading: light from upper-front, like donut.c
-        // L = (0, 1, -1) / sqrt(2)
-        float L = (ny2 - nz2) * 0.7071f;
-        if (L < 0)
-          L = 0;
+        // Diffuse (Lambertian)
+        float diff = nx2 * lx + ny2 * ly + nz2 * lz;
+        if (diff < 0) diff = 0;
+
+        // Specular (Blinn-Phong)
+        float spec_dot = nx2 * hx + ny2 * hy + nz2 * hz;
+        if (spec_dot < 0) spec_dot = 0;
+        float spec = spec_dot * spec_dot;
+        spec = spec * spec; // ^4
+        spec = spec * spec; // ^8
+
+        float L = 0.08f + 0.62f * diff + 0.30f * spec;
+        if (L > 1.0f) L = 1.0f;
+
         zbuf[ys][xs] = ooz;
         const char *chars = ".,-~:;=!*#$@";
         int ci = (int)(L * 11.0f);
-        if (ci < 0)
-          ci = 0;
-        if (ci > 11)
-          ci = 11;
+        if (ci < 0) ci = 0;
+        if (ci > 11) ci = 11;
         screen[ys][xs] = chars[ci];
       }
     }
