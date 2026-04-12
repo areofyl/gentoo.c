@@ -43,10 +43,34 @@ static const char *LOGO[] = {
 #define LOGO_ROWS 18
 #define LOGO_COLS 34
 
-#define MAX_POINTS 8000
+#define MAX_POINTS 16000
 static float PX[MAX_POINTS], PY[MAX_POINTS], PZ[MAX_POINTS];
 static float NX[MAX_POINTS], NY[MAX_POINTS], NZ[MAX_POINTS];
 static int POINT_COUNT = 0;
+
+static float char_weight(char ch) {
+  switch (ch) {
+  case 'M': return 1.00f;
+  case 'N': return 0.88f;
+  case 'm': return 0.76f;
+  case 'd': return 0.66f;
+  case 'h': return 0.56f;
+  case 'b': return 0.56f;
+  case 'y': return 0.46f;
+  case 'o': return 0.38f;
+  case 'n': return 0.38f;
+  case 's': return 0.30f;
+  case '+': return 0.22f;
+  case ':': return 0.18f;
+  case '=': return 0.22f;
+  case '-': return 0.14f;
+  case '`': return 0.08f;
+  case '.': return 0.10f;
+  case '/': return 0.12f;
+  case '\'': return 0.06f;
+  default:  return 0.0f;
+  }
+}
 
 static char screen[HEIGHT][WIDTH];
 static float zbuf[HEIGHT][WIDTH];
@@ -64,115 +88,121 @@ static void build_points(void) {
   const float sy = 0.14f;
   const float cx = (LOGO_COLS - 1) * 0.5f;
   const float cy = (LOGO_ROWS - 1) * 0.5f;
+  const float zmax = 0.18f;
+  const int Z_LAYERS = 6;
 
-  // Build a 2D mask, then compute Chebyshev distance from each filled
-  // cell to the nearest empty cell. Edge cells get d=1; deep interior
-  // cells get larger d. Cells with d > MAX_D become the hole.
-  int mask[LOGO_ROWS][LOGO_COLS];
-  int dist[LOGO_ROWS][LOGO_COLS];
+  // Build height map from character weights
+  float hmap[LOGO_ROWS][LOGO_COLS];
   for (int r = 0; r < LOGO_ROWS; r++) {
     int len = 0;
     while (LOGO[r][len])
       len++;
     for (int c = 0; c < LOGO_COLS; c++) {
       char ch = (c < len) ? LOGO[r][c] : ' ';
-      // Only the dense glyphs count as logo body. The light chars form
-      // the natural "hole" (the notch in the middle of the gentoo swirl).
-      int filled = (ch == 'M' || ch == 'N' || ch == 'm' || ch == 'n' ||
-                    ch == 'd' || ch == 'h' || ch == 'y' || ch == 'b');
-      mask[r][c] = filled;
-      dist[r][c] = filled ? 999 : 0;
+      hmap[r][c] = char_weight(ch);
     }
   }
-  for (int iter = 1; iter < 12; iter++) {
-    int changed = 0;
-    for (int r = 0; r < LOGO_ROWS; r++) {
-      for (int c = 0; c < LOGO_COLS; c++) {
-        if (dist[r][c] != 999)
-          continue;
-        int found = 0;
-        for (int dr = -1; dr <= 1 && !found; dr++) {
-          for (int dc = -1; dc <= 1 && !found; dc++) {
-            int nr = r + dr, nc = c + dc;
-            if (nr < 0 || nr >= LOGO_ROWS || nc < 0 || nc >= LOGO_COLS)
-              continue;
-            if (dist[nr][nc] == iter - 1) {
-              dist[r][c] = iter;
-              changed = 1;
-              found = 1;
-            }
-          }
-        }
-      }
-    }
-    if (!changed)
-      break;
-  }
 
-  const int MAX_D = 99;
-  const float zmax = 0.13f;
-  const int Z_LAYERS = 5;
-
-  // Per-cell outward direction in object xy (gradient toward empty cells).
-  float ndx[LOGO_ROWS][LOGO_COLS];
-  float ndy[LOGO_ROWS][LOGO_COLS];
+  // Compute normals from height gradient (central differences)
+  float gnx[LOGO_ROWS][LOGO_COLS];
+  float gny[LOGO_ROWS][LOGO_COLS];
+  float gnz[LOGO_ROWS][LOGO_COLS];
   for (int r = 0; r < LOGO_ROWS; r++) {
     for (int c = 0; c < LOGO_COLS; c++) {
-      float ox_acc = 0, oy_acc = 0;
-      if (mask[r][c]) {
-        for (int dr = -1; dr <= 1; dr++) {
-          for (int dc = -1; dc <= 1; dc++) {
-            if (dr == 0 && dc == 0)
-              continue;
-            int nr = r + dr, nc = c + dc;
-            int empty = (nr < 0 || nr >= LOGO_ROWS || nc < 0 ||
-                         nc >= LOGO_COLS || !mask[nr][nc]);
-            if (empty) {
-              ox_acc += (float)dc;
-              oy_acc += (float)(-dr);
-            }
-          }
-        }
+      if (hmap[r][c] <= 0.0f) {
+        gnx[r][c] = gny[r][c] = 0;
+        gnz[r][c] = 1;
+        continue;
       }
-      float l = sqrtf(ox_acc * ox_acc + oy_acc * oy_acc);
-      if (l > 1e-6f) {
-        ndx[r][c] = ox_acc / l;
-        ndy[r][c] = oy_acc / l;
-      } else {
-        ndx[r][c] = 0;
-        ndy[r][c] = 0;
-      }
+      float dhdx = 0, dhdy = 0;
+      if (c > 0 && c < LOGO_COLS - 1)
+        dhdx = (hmap[r][c + 1] - hmap[r][c - 1]) * 0.5f;
+      else if (c == 0)
+        dhdx = hmap[r][c + 1] - hmap[r][c];
+      else
+        dhdx = hmap[r][c] - hmap[r][c - 1];
+
+      if (r > 0 && r < LOGO_ROWS - 1)
+        dhdy = (hmap[r + 1][c] - hmap[r - 1][c]) * 0.5f;
+      else if (r == 0)
+        dhdy = hmap[r + 1][c] - hmap[r][c];
+      else
+        dhdy = hmap[r][c] - hmap[r - 1][c];
+
+      // Scale gradients by cell spacing
+      dhdx /= sx;
+      dhdy /= sy;
+
+      // Normal = normalize(-dh/dx, dh/dy, 1)
+      // (dh/dy sign flipped because row increases downward but y increases upward)
+      float nnx = -dhdx;
+      float nny = dhdy;
+      float nnz = 1.0f;
+      float l = sqrtf(nnx * nnx + nny * nny + nnz * nnz);
+      gnx[r][c] = nnx / l;
+      gny[r][c] = nny / l;
+      gnz[r][c] = nnz / l;
     }
   }
 
   int idx = 0;
   for (int row = 0; row < LOGO_ROWS; row++) {
     for (int col = 0; col < LOGO_COLS; col++) {
-      if (!mask[row][col])
+      float h = hmap[row][col];
+      if (h <= 0.0f)
         continue;
-      int d = dist[row][col];
-      if (d > MAX_D)
-        continue;
-      float t_depth = (float)(d - 1) / (float)(MAX_D - 1 + 0.0001f);
-      float zr = zmax * sqrtf(0.15f + 0.85f * t_depth);
 
       float ox = (col - cx) * sx;
       float oy = (cy - row) * sy;
-      float onx = ndx[row][col];
-      float ony = ndy[row][col];
+      float zr = h * zmax;
 
       for (int k = 0; k < Z_LAYERS; k++) {
         if (idx >= MAX_POINTS)
           break;
-        float t = ((float)k / (Z_LAYERS - 1)) - 0.5f;
-        float tn = t * 2.0f; // -1..1
+        float t = ((float)k / (Z_LAYERS - 1)) - 0.5f; // -0.5..0.5
         PX[idx] = ox;
         PY[idx] = oy;
         PZ[idx] = t * 2.0f * zr;
-        float horiz = sqrtf(1.0f - tn * tn);
-        NX[idx] = onx * horiz;
-        NY[idx] = ony * horiz;
-        NZ[idx] = tn;
+
+        if (k == 0) {
+          // Bottom face: mirror of top gradient normal
+          NX[idx] = gnx[row][col];
+          NY[idx] = gny[row][col];
+          NZ[idx] = -gnz[row][col];
+        } else if (k == Z_LAYERS - 1) {
+          // Top face: gradient-based normal
+          NX[idx] = gnx[row][col];
+          NY[idx] = gny[row][col];
+          NZ[idx] = gnz[row][col];
+        } else {
+          // Side layers: blend between edge outward and z-axis
+          // Find direction toward nearest lower neighbor
+          float ex = 0, ey = 0;
+          for (int dr = -1; dr <= 1; dr++) {
+            for (int dc = -1; dc <= 1; dc++) {
+              if (dr == 0 && dc == 0)
+                continue;
+              int nr = row + dr, nc = col + dc;
+              float nh = 0;
+              if (nr >= 0 && nr < LOGO_ROWS && nc >= 0 && nc < LOGO_COLS)
+                nh = hmap[nr][nc];
+              if (nh < h) {
+                ex += (float)dc;
+                ey += (float)(-dr);
+              }
+            }
+          }
+          float el = sqrtf(ex * ex + ey * ey);
+          if (el > 1e-6f) {
+            ex /= el;
+            ey /= el;
+          }
+          float tn = ((float)k / (Z_LAYERS - 1)) * 2.0f - 1.0f;
+          float side = sqrtf(1.0f - tn * tn);
+          NX[idx] = ex * side;
+          NY[idx] = ey * side;
+          NZ[idx] = tn;
+        }
         idx++;
       }
     }
