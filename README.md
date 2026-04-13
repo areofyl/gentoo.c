@@ -34,4 +34,4 @@ It clears the screen and animates in place. Ctrl-C to stop.
 - Every frame: rotate every point around X and Y, project with perspective,
   z-buffer, and shade by surface normal
 
-~250 lines, no dependencies beyond libm.
+~300 lines, no dependencies beyond libm.
