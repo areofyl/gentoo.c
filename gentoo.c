@@ -27,15 +27,15 @@ static const char *LOGO[] = {
     " `omMMMMMMMMMMMMNmdmmmmddhhy/`    ",
     " omMMMMMMMMMMMNhhyyyohmdddhhhdo`  ",
     ".ydMMMMMMMMMMdhs++so/smdddhhhhdm+`",
-    " oyhdmNMMMMMMMNdyooydmddddhhhhyhNd.",
-    "  :oyhhdNNMMMMMMMNNNmmdddhhhhhyymMh",
-    "    .:+sydNMMMMMNNNmmmdddhhhhhhmMmy",
-    "       /mMMMMMMNNNmmmdddhhhhhmMNhs:",
-    "    `oNMMMMMMMNNNmmmddddhhdmMNhs+` ",
-    "  `sNMMMMMMMMNNNmmmdddddmNMmhs/.   ",
-    " /NMMMMMMMMNNNNmmmdddmNMNdso:`     ",
-    "+MMMMMMMNNNNNmmmmdmNMNdso/-        ",
-    "yMMNNNNNNNmmmmmNNMmhs+/-`          ",
+    " oyhdmNMMMMMMMNdyooydMddddhhhhyhNd.",
+    "  :oyhhdNNMMMMMMMNNMMMdddhhhhhyymMh",
+    "    .:+sydNMMMMMNNMMMMdddhhhhhhmMmy",
+    "       /mMMMMMMNNNMMMdddhhhhhmMNhs:",
+    "    `oNMMMMMMMNNNMMMddddhhdmMNhs+` ",
+    "  `sNMMMMMMMMNNNMMMdddddmNMmhs/.   ",
+    " /NMMMMMMMMNNNNMMMdddmNMNdso:`     ",
+    "+MMMMMMMNNNNNMMMMdMNMNdso/-        ",
+    "yMMNNNNNNNMMMMMNNMmhs+/-`          ",
     "/hMMNNNNNNNNMNdhs++/-`             ",
     "`/ohdmmddhys+++/:.`                ",
     "  `-//////:--.                     ",
@@ -46,40 +46,63 @@ static const char *LOGO[] = {
 #define MAX_POINTS 16000
 static float PX[MAX_POINTS], PY[MAX_POINTS], PZ[MAX_POINTS];
 static float NX[MAX_POINTS], NY[MAX_POINTS], NZ[MAX_POINTS];
+static float PWEIGHT[MAX_POINTS]; // original logo density
 static int POINT_COUNT = 0;
 
 static float char_weight(char ch) {
   switch (ch) {
-  case 'M': return 1.00f;
-  case 'N': return 0.88f;
-  case 'm': return 0.76f;
-  case 'd': return 0.66f;
-  case 'h': return 0.56f;
-  case 'b': return 0.56f;
-  case 'y': return 0.46f;
-  case 'o': return 0.38f;
-  case 'n': return 0.38f;
-  case 's': return 0.30f;
-  case '+': return 0.22f;
-  case ':': return 0.18f;
-  case '=': return 0.22f;
-  case '-': return 0.14f;
-  case '`': return 0.08f;
-  case '.': return 0.10f;
-  case '/': return 0.12f;
-  case '\'': return 0.06f;
-  default:  return 0.0f;
+  case 'M':
+    return 1.00f;
+  case 'N':
+    return 0.88f;
+  case 'm':
+    return 0.76f;
+  case 'd':
+    return 0.66f;
+  case 'h':
+    return 0.56f;
+  case 'b':
+    return 0.56f;
+  case 'y':
+    return 0.46f;
+  case 'o':
+    return 0.38f;
+  case 'n':
+    return 0.38f;
+  case 's':
+    return 0.30f;
+  case '+':
+    return 0.22f;
+  case ':':
+    return 0.18f;
+  case '=':
+    return 0.22f;
+  case '-':
+    return 0.14f;
+  case '`':
+    return 0.08f;
+  case '.':
+    return 0.10f;
+  case '/':
+    return 0.12f;
+  case '\'':
+    return 0.06f;
+  default:
+    return 0.0f;
   }
 }
 
 static char screen[HEIGHT][WIDTH];
 static float zbuf[HEIGHT][WIDTH];
+// Color per cell: 0 = magenta (outer), 1 = white (inner detail)
+static int colorbuf[HEIGHT][WIDTH];
 
 static void clear_buf(void) {
   for (int i = 0; i < HEIGHT; i++)
     for (int j = 0; j < WIDTH; j++) {
       screen[i][j] = ' ';
       zbuf[i][j] = -1e9f;
+      colorbuf[i][j] = 0;
     }
 }
 
@@ -134,7 +157,8 @@ static void build_points(void) {
       dhdy /= sy;
 
       // Normal = normalize(-dh/dx, dh/dy, 1)
-      // (dh/dy sign flipped because row increases downward but y increases upward)
+      // (dh/dy sign flipped because row increases downward but y increases
+      // upward)
       float nnx = -dhdx;
       float nny = dhdy;
       float nnz = 1.0f;
@@ -163,6 +187,7 @@ static void build_points(void) {
         PX[idx] = ox;
         PY[idx] = oy;
         PZ[idx] = t * 2.0f * zr;
+        PWEIGHT[idx] = h;
 
         if (k == 0) {
           // Bottom face: mirror of top gradient normal
@@ -239,7 +264,9 @@ int main(void) {
     // Half-vector for Blinn-Phong: H = normalize(L + V)
     float hx = lx + vx, hy = ly + vy, hz = lz + vz;
     float hl = sqrtf(hx * hx + hy * hy + hz * hz);
-    hx /= hl; hy /= hl; hz /= hl;
+    hx /= hl;
+    hy /= hl;
+    hz /= hl;
 
     for (int i = 0; i < POINT_COUNT; i++) {
       float px = PX[i], py = PY[i], pz = PZ[i];
@@ -271,30 +298,57 @@ int main(void) {
       if (ooz > zbuf[ys][xs]) {
         // Diffuse (Lambertian)
         float diff = nx2 * lx + ny2 * ly + nz2 * lz;
-        if (diff < 0) diff = 0;
+        if (diff < 0)
+          diff = 0;
 
         // Specular (Blinn-Phong)
         float spec_dot = nx2 * hx + ny2 * hy + nz2 * hz;
-        if (spec_dot < 0) spec_dot = 0;
+        if (spec_dot < 0)
+          spec_dot = 0;
         float spec = spec_dot * spec_dot;
         spec = spec * spec; // ^4
         spec = spec * spec; // ^8
 
         float L = 0.08f + 0.62f * diff + 0.30f * spec;
-        if (L > 1.0f) L = 1.0f;
+        if (L > 1.0f)
+          L = 1.0f;
 
         zbuf[ys][xs] = ooz;
         const char *chars = ".,-~:;=!*#$@";
         int ci = (int)(L * 11.0f);
-        if (ci < 0) ci = 0;
-        if (ci > 11) ci = 11;
+        if (ci < 0)
+          ci = 0;
+        if (ci > 11)
+          ci = 11;
         screen[ys][xs] = chars[ci];
+        colorbuf[ys][xs] = (PWEIGHT[i] >= 0.5f) ? 1 : 0;
       }
     }
 
     printf("\033[H");
     for (int i = 0; i < HEIGHT; i++) {
-      fwrite(screen[i], 1, WIDTH, stdout);
+      int prev_color = -1;
+      for (int j = 0; j < WIDTH; j++) {
+        if (screen[i][j] == ' ') {
+          if (prev_color != -1) {
+            printf("\033[0m");
+            prev_color = -1;
+          }
+          fputc(' ', stdout);
+        } else {
+          int c = colorbuf[i][j];
+          if (c != prev_color) {
+            if (c == 1)
+              printf("\033[1;37m"); // bold white
+            else
+              printf("\033[1;35m"); // bold magenta
+            prev_color = c;
+          }
+          fputc(screen[i][j], stdout);
+        }
+      }
+      if (prev_color != -1)
+        printf("\033[0m");
       fputc('\n', stdout);
     }
     fflush(stdout);
